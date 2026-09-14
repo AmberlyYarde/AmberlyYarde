@@ -1,0 +1,69 @@
+name: CI Pipeline
+
+on:
+  - push
+  - pull_request
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - stable
+          - oldstable
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.runtime }}
+          cache: ${{ hashFiles('go.mod') != '' && 'go.mod' || '' }}
+
+      - name: Install dependencies
+        if: hashFiles('go.mod') != ''
+        run: go mod download
+
+      - name: Check formatting
+        if: hashFiles('go.mod') != ''
+        run: test -z "$(gofmt -l .)"
+
+      - name: Run go vet
+        if: hashFiles('go.mod') != ''
+        run: go vet ./...
+
+      - name: Build package tree
+        if: hashFiles('go.mod') != ''
+        run: go build ./...
+
+      - name: Run tests
+        if: hashFiles('go.mod') != ''
+        run: go test ./...
+
+      - name: Write pipeline summary
+        if: always()
+        shell: bash
+        run: |
+          outcomes=("Checkout: ${{ steps.checkout.outcome }}" "Go stable: ${{ steps.go-stable.outcome }}" "Go oldstable: ${{ steps.go-oldstable.outcome }}")
+          for outcome in "${outcomes[@]}"; do
+            printf '%s\n' "$outcome"
+          done
+          {
+            printf '| Stage | Outcome |\n'
+            printf '|---|---|\n'
+            printf '| Checkout | %s |\n' "${{ steps.checkout.outcome }}"
+            printf '| Go stable | %s |\n' "${{ steps.go-stable.outcome }}"
+            printf '| Go oldstable | %s |\n' "${{ steps.go-oldstable.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
